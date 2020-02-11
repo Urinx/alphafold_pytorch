@@ -195,10 +195,8 @@ def load_data(data_file, config):
         else:
             inputs_2d_diagonal = inputs_2d
 
-        scalar_class = collections.namedtuple('ScalarClass', desired_scalars)
-        target_class = collections.namedtuple('TargetClass', desired_targets)
-        scalar_tensors = [data.get(f'{k}_unnormalized', data[k]) for k in desired_scalars]
-        target_tensors = [data.get(f'{k}_unnormalized', data[k]) for k in desired_targets]
+        scalars = collections.namedtuple('ScalarClass', desired_scalars)(*[data.get(f'{k}_unnormalized', data[k]) for k in desired_scalars])
+        targets = collections.namedtuple('TargetClass', desired_targets)(*[data.get(f'{k}_unnormalized', data[k]) for k in desired_targets])
 
         p = Protein(
             len=len(data['sequence']),
@@ -206,8 +204,8 @@ def load_data(data_file, config):
             inputs_1d=inputs_1d,
             inputs_2d=inputs_2d,
             inputs_2d_diagonal=inputs_2d_diagonal,
-            scalars=scalar_class(*scalar_tensors),
-            targets=target_class(*target_tensors)
+            scalars=scalars,
+            targets=targets
         )
         return p
 

@@ -1,8 +1,10 @@
-import argparse
 import utils
+import argparse
+import itertools
 import numpy as np
-import scipy.io as sio
 from pathlib import Path
+import scipy.io as sio
+from scipy.spatial.distance import pdist, squareform
 
 def make_crops(seq_file):
     target_line, *seq_line = seq_file.read_text().split('\n')
@@ -92,6 +94,50 @@ def sequence_weights(sequence_matrix):
                 weights[j] += 1
     return 1.0 / weights
 
+def calculate_f(align, theta=0.38):
+    M, N = align.shape
+    q = align.max()
+
+    # W: 1*M
+    W = 1 / (1 + np.sum(squareform(pdist(align,'hamming')<theta),0))
+    Meff = np.sum(W)
+
+    # cache a align residue table: q*N*M
+    residue_table = np.zeros((q, N, M))
+    for i in range(q):
+        residue_table[i] = align.T == i+1
+
+    # fi: N*q
+    fi = np.array([np.sum(W * residue_table[i], 1) for i in range(q)]).T / Meff
+
+    # this cost most time!
+    fij = np.empty((N, N, q, q))
+    for (A, B) in itertools.product(range(q), range(q)):
+        for (i, j) in itertools.combinations(range(N), 2):
+            t = np.sum(W * residue_table[A][i].T * residue_table[B][j].T)
+            fij[i,j,A,B] = t
+            fij[j,i,B,A] = t
+    fij /= Meff
+    for i in range(N):
+        fij[i,i] = np.eye(q) * fi[i]
+
+    del residue_table
+    return fi, fij, Meff
+
+def calculate_MI(fi, fij):
+    N, q = fi.shape
+    MI = np.zeros((N, N, 1), dtype=np.float32)
+
+    for i, j in itertools.combinations(range(N),2):
+        m = 0
+        for (A, B) in itertools.product(range(q), range(q)):
+            if fij[i,j,A,B] > 0:
+                m += fij[i,j,A,B] * np.log( fij[i,j,A,B] / fi[i,A] / fi[j,B] )
+        MI[i,j,0] = m
+        MI[j,i,0] = m
+
+    return MI
+
 def feature_generation(seq_file, out_file):
     target_line, *seq_line = seq_file.read_text().split('\n')
     target = seq_file.stem
@@ -109,6 +155,14 @@ def feature_generation(seq_file, out_file):
         aln_file = data_dir / f'{name}.aln'
         mat_file = data_dir / f'{name}.mat'
 
+        if aln_file.exists():
+            aln, _ = read_aln(aln_file)
+        else:
+            aln, aln_id = read_aln(fas_file)
+            aln = aln[:, aln[0] != '-']
+            write_aln(aln, aln_id, aln_file)
+            exit()
+
         if mat_file.exists():
             mat = sio.loadmat(mat_file)
             pseudo_bias = np.float32(mat['pseudo_bias'])
@@ -119,12 +173,6 @@ def feature_generation(seq_file, out_file):
             pseudo_frob = np.zeros((L, L, 1), dtype=np.float32)
             pseudolikelihood = np.zeros((L, L, 484), dtype=np.float32)
 
-        if aln_file.exists():
-            aln, _ = read_aln(aln_file)
-        else:
-            aln, aln_id = read_aln(fas_file)
-            aln = aln[:, aln[0] != '-']
-            write_aln(aln, aln_id, aln_file)
         gap_count = np.float32(aln=='-')
         gap_matrix = np.expand_dims(np.matmul(gap_count.T, gap_count) / aln.shape[0], -1)
 
@@ -147,6 +195,11 @@ def feature_generation(seq_file, out_file):
         non_gapped_profile[:, -1] = 0
         non_gapped_profile /= non_gapped_profile.sum(-1).reshape(-1, 1)
 
+        mapping = {aa: i for i, aa in enumerate('-ARNDCQEGHILKMFPSTWYVX')}
+        a2n = np.frompyfunc(lambda x: mapping[x], 1, 1)
+        fi, fij, Meff = calculate_f(a2n(aln))
+        MI = calculate_MI(fi, fij)
+
         data = {
             'chain_name': target,
             'domain_name': name,
@@ -167,10 +220,28 @@ def feature_generation(seq_file, out_file):
             'pseudo_frob': pseudo_frob,
             'pseudo_bias': pseudo_bias,
             'pseudolikelihood': pseudolikelihood,
+            'num_effective_alignments': np.float32(Meff),
+            'mutual_information': MI,
+            # no need features for prediction
+            'resolution': np.float32(0),
+            'sec_structure': np.zeros((L, 8), dtype=np.int64),
+            'sec_structure_mask': np.zeros((L, 1), dtype=np.int64),
+            'solv_surf': np.zeros((L, 1), dtype=np.float32),
+            'solv_surf_mask': np.zeros((L, 1), dtype=np.int64),
+            'alpha_positions': np.zeros((L, 3), dtype=np.float32),
+            'alpha_mask': np.zeros((L, 1), dtype=np.int64),
+            'beta_positions': np.zeros((L, 3), dtype=np.float32),
+            'beta_mask': np.zeros((L, 1), dtype=np.int64),
+            'superfamily': '',
+            'between_segment_residues': np.zeros((L, 1), dtype=np.int64),
+            'phi_angles': np.zeros((L, 1), dtype=np.float32),
+            'phi_mask': np.zeros((L, 1), dtype=np.int64),
+            'psi_angles': np.zeros((L, 1), dtype=np.float32),
+            'psi_mask': np.zeros((L, 1), dtype=np.int64),
             # to be fixed soon
             'profile': np.zeros((L, 21), dtype=np.float32),
             'profile_with_prior': np.zeros((L, 22), dtype=np.float32),
-            'profile_with_prior_without_gaps': np.zeros((L, 21), dtype=np.float32),
+            'profile_with_prior_without_gaps': np.zeros((L, 21), dtype=np.float32)
         }
         dataset.append(data)
     
