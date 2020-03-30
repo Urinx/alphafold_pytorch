@@ -18,6 +18,7 @@ def run_eval(target_path, model_path, replica, out_dir, device):
         model.load_state_dict(torch.load(model_file, map_location=device))
     else:
         cost_time = utils.load_tf_ckpt(model, model_file)
+        model.to(device)
         print(f'Load tf model cost time: {cost_time}')
 
     num_examples = 0
@@ -66,6 +67,7 @@ def run_eval(target_path, model_path, replica, out_dir, device):
                 crop_x = torch.tensor([crop_x]).to(device)
                 crop_y = torch.tensor([crop_y]).to(device)
                 out = model(x_2d, crop_x, crop_y)
+                out = {k:t.cpu() for k,t in out.items()}
 
             contact_probs = out['contact_probs'][0,
                                                  prepad_y:crop_size_y - postpad_y,
@@ -84,19 +86,19 @@ def run_eval(target_path, model_path, replica, out_dir, device):
 
             if 'secstruct_probs' in out:
                 sec_x = out['secstruct_probs'][0, prepad_x:crop_size_x - postpad_x].numpy()
-                sec_y = out['secstruct_probs'][0, crop_size_x + prepad_y:crop_size_x + crop_size_y - postpad_y].detach().numpy()
+                sec_y = out['secstruct_probs'][0, crop_size_x + prepad_y:crop_size_x + crop_size_y - postpad_y].numpy()
                 sec_accum[ic:ic + sec_x.shape[0]] += sec_x
                 sec_accum[jc:jc + sec_y.shape[0]] += sec_y
             
             if 'torsion_probs' in out:
                 tor_x = out['torsion_probs'][0, prepad_x:crop_size_x - postpad_x].numpy()
-                tor_y = out['torsion_probs'][0, crop_size_x + prepad_y:crop_size_x + crop_size_y - postpad_y].detach().numpy()
+                tor_y = out['torsion_probs'][0, crop_size_x + prepad_y:crop_size_x + crop_size_y - postpad_y].numpy()
                 tor_accum[ic:ic + tor_x.shape[0]] += tor_x
                 tor_accum[jc:jc + tor_y.shape[0]] += tor_y
             
             if 'asa_output' in out:
                 asa_x = out['asa_output'][0, prepad_x:crop_size_x - postpad_x].numpy()
-                asa_y = out['asa_output'][0, crop_size_x + prepad_y:crop_size_x + crop_size_y - postpad_y].detach().numpy()
+                asa_y = out['asa_output'][0, crop_size_x + prepad_y:crop_size_x + crop_size_y - postpad_y].numpy()
                 asa_accum[ic:ic + asa_x.shape[0]] += np.squeeze(asa_x, 1)
                 asa_accum[jc:jc + asa_y.shape[0]] += np.squeeze(asa_y, 1)
 

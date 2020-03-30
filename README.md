@@ -50,7 +50,7 @@ optional arguments:
 ```
 For example:
 ```bash
-python alphafold.py -i test_data/T1019s2.pkl -o T1019s2_out -t D -t 0
+python alphafold.py -i test_data/T1019s2.pkl -o T1019s2_out -t D -r 0
 ```
 This uses the replica `0` of `Distogram` models to predict the distogram probs of the input data.
 
